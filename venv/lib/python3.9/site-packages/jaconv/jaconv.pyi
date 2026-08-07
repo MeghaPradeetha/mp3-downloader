@@ -1,0 +1,89 @@
+import typing
+
+from _typeshed import Incomplete
+
+from .compat import map as map
+from .conv_table import H2HK_TABLE as H2HK_TABLE
+from .conv_table import H2K_TABLE as H2K_TABLE
+from .conv_table import H2Z_A as H2Z_A
+from .conv_table import H2Z_AD as H2Z_AD
+from .conv_table import H2Z_AK as H2Z_AK
+from .conv_table import H2Z_ALL as H2Z_ALL
+from .conv_table import H2Z_D as H2Z_D
+from .conv_table import H2Z_DK as H2Z_DK
+from .conv_table import H2Z_K as H2Z_K
+from .conv_table import HEP2KANA as HEP2KANA
+from .conv_table import JULIUS_LONG_VOWEL as JULIUS_LONG_VOWEL
+from .conv_table import K2H_TABLE as K2H_TABLE
+from .conv_table import KANA2HEP as KANA2HEP
+from .conv_table import SMALL_KANA2NORMAL_KANA as SMALL_KANA2NORMAL_KANA
+from .conv_table import Z2H_A as Z2H_A
+from .conv_table import Z2H_AD as Z2H_AD
+from .conv_table import Z2H_AK as Z2H_AK
+from .conv_table import Z2H_ALL as Z2H_ALL
+from .conv_table import Z2H_D as Z2H_D
+from .conv_table import Z2H_DK as Z2H_DK
+from .conv_table import Z2H_K as Z2H_K
+
+consonants: Incomplete
+
+def _exclude_ignorechar(
+    ignore: str, conv_map: typing.Dict[int, str]
+) -> typing.Dict[int, str]: ...
+def _convert(text: str, conv_map: typing.Dict[int, str]) -> str: ...
+def _translate(text: str, ignore: str, conv_map: typing.Dict[int, str]) -> str: ...
+def hira2kata(text: str, ignore: str = '') -> str: ...
+def hira2hkata(text: str, ignore: str = '') -> str: ...
+def kata2hira(text: str, ignore: str = '') -> str: ...
+def enlargesmallkana(text: str, ignore: str = '') -> str: ...
+def enlarge_smallkana(text: str, ignore: str = '') -> str: ...
+def h2z(
+    text: str,
+    ignore: str = '',
+    kana: bool = True,
+    ascii: bool = False,
+    digit: bool = False,
+) -> str: ...
+def hankaku2zenkaku(
+    text: str,
+    ignore: str = '',
+    kana: bool = True,
+    ascii: bool = False,
+    digit: bool = False,
+) -> str: ...
+def han2zen(
+    text: str,
+    ignore: str = '',
+    kana: bool = True,
+    ascii: bool = False,
+    digit: bool = False,
+) -> str: ...
+def z2h(
+    text: str,
+    ignore: str = '',
+    kana: bool = True,
+    ascii: bool = False,
+    digit: bool = False,
+) -> str: ...
+def zenkaku2hankaku(
+    text: str,
+    ignore: str = '',
+    kana: bool = True,
+    ascii: bool = False,
+    digit: bool = False,
+) -> str: ...
+def zen2han(
+    text: str,
+    ignore: str = '',
+    kana: bool = True,
+    ascii: bool = False,
+    digit: bool = False,
+) -> str: ...
+def normalize(
+    text: str, mode: typing.Literal['NFC', 'NFD', 'NFKC', 'NFKD'] = 'NFKC'
+) -> str: ...
+def kana2alphabet(text: str) -> str: ...
+def kata2alphabet(text: str) -> str: ...
+def alphabet2kana(text: str) -> str: ...
+def alphabet2kata(text: str) -> str: ...
+def hiragana2julius(text: str) -> str: ...

@@ -183,6 +183,39 @@ def open_folder():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route("/api/browse_folder", methods=["POST"])
+def browse_folder():
+    data = request.json or {}
+    current_path = data.get("current_path", "")
+    
+    try:
+        if sys.platform == "darwin":  # macOS
+            cmd = ['osascript', '-e', 'POSIX path of (choose folder with prompt "Select download location:")']
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                path = result.stdout.strip()
+                if path.endswith('/'):
+                    path = path[:-1]
+                return jsonify({"success": True, "path": path})
+            else:
+                return jsonify({"success": False, "error": "Cancelled"})
+        else:
+            # Fallback for Windows/Linux using tkinter
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
+            folder_path = filedialog.askdirectory(initialdir=current_path, title="Select Download Location")
+            root.destroy()
+            
+            if folder_path:
+                return jsonify({"success": True, "path": folder_path})
+            else:
+                return jsonify({"success": False, "error": "Cancelled"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 if __name__ == "__main__":
     import socket
     
