@@ -4,7 +4,7 @@ A powerful, modern Web Application and CLI tool to download entire Spotify **pla
 
 It works by scraping Spotify's public embed pages and matching the audio on YouTube Music. **No Spotify Premium or API keys are required!**
 
-![Spotify Downloader Web UI](https://i.imgur.com/Kxz956Q.png) *(Note: Replace with your actual screenshot)*
+<img width="958" height="850" alt="image" src="https://github.com/user-attachments/assets/39a470f2-e68d-4c86-9b4a-9248e9b83331" />
 
 ## ✨ Features
 
