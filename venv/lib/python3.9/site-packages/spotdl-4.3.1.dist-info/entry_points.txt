@@ -1,0 +1,2 @@
+[console_scripts]
+spotdl = spotdl:console_entry_point

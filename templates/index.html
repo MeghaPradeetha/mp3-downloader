@@ -58,6 +58,9 @@
                         <label for="output-path"><i class="fa-regular fa-folder-open"></i> Save Location:</label>
                         <div class="folder-input-wrap">
                             <input type="text" id="output-path" value="{{ default_output_dir }}">
+                            <button id="btn-browse" title="Browse for Folder" class="btn-secondary">
+                                <i class="fa-solid fa-magnifying-glass-folder"></i> Browse...
+                            </button>
                             <button id="btn-open-folder" title="Open Save Directory" class="btn-secondary">
                                 <i class="fa-solid fa-folder-open"></i> Open Folder
                             </button>
@@ -154,6 +157,7 @@
             const outputPathInput = document.getElementById('output-path');
             const formatSelect = document.getElementById('audio-format');
             const bitrateSelect = document.getElementById('audio-bitrate');
+            const btnBrowse = document.getElementById('btn-browse');
             const btnOpenFolder = document.getElementById('btn-open-folder');
             const btnRefreshFiles = document.getElementById('btn-refresh-files');
             
@@ -181,6 +185,30 @@
             btnClear.addEventListener('click', () => {
                 urlInput.value = '';
                 urlInput.focus();
+            });
+
+            btnBrowse.addEventListener('click', () => {
+                const currentPath = outputPathInput.value;
+                btnBrowse.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+                fetch('/api/browse_folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ current_path: currentPath })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    btnBrowse.innerHTML = '<i class="fa-solid fa-magnifying-glass-folder"></i> Browse...';
+                    if (data.success && data.path) {
+                        outputPathInput.value = data.path;
+                        fetchFiles(); // Refresh file list for new directory
+                    } else if (data.error && data.error !== 'Cancelled') {
+                        console.error('Browse error:', data.error);
+                    }
+                })
+                .catch(err => {
+                    btnBrowse.innerHTML = '<i class="fa-solid fa-magnifying-glass-folder"></i> Browse...';
+                    console.error(err);
+                });
             });
 
             btnOpenFolder.addEventListener('click', () => {

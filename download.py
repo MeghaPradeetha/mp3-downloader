@@ -94,11 +94,16 @@ def download_single_track(track, output_dir, audio_format="mp3", bitrate="320k",
         "default_search": "ytsearch1",  # Search YouTube for first result
         "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
         "ffmpeg_location": ffmpeg_dir,
+        "writethumbnail": True,
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": audio_format,
                 "preferredquality": bitrate_num,
+            },
+            {
+                "key": "EmbedThumbnail",
+                "already_have_thumbnail": False,
             },
         ],
         "postprocessor_args": [
