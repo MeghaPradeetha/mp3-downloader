@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify MP3 Downloader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="background-glow"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="brand">
+                <div class="logo-icon">
+                    <i class="fa-brands fa-spotify"></i>
+                </div>
+                <div>
+                    <h1>Spotify MP3 Downloader</h1>
+                    <p class="subtitle">Download Playlists, Albums, Songs & Discographies with full HD Tags</p>
+                </div>
+            </div>
+            <div class="header-badges">
+                <span class="badge" id="ffmpeg-status"><i class="fa-solid fa-circle-check"></i> FFmpeg Ready</span>
+                <span class="badge quality-badge"><i class="fa-solid fa-music"></i> 320 kbps MP3</span>
+                <span class="badge" style="background:rgba(29,185,84,0.15);color:#1ed760;"><i class="fa-solid fa-lock-open"></i> No API Key Needed</span>
+            </div>
+        </header>
+
+        <!-- Main Card -->
+        <main class="main-content">
+            <div class="card download-card">
+                <div class="card-title">
+                    <i class="fa-solid fa-link"></i>
+                    <h2>Spotify Media Link</h2>
+                </div>
+                
+                <div class="input-group">
+                    <div class="input-wrapper">
+                        <i class="fa-brands fa-spotify input-icon"></i>
+                        <input type="text" id="spotify-url" placeholder="Paste Spotify Playlist, Album, Track, or Artist Link (e.g. https://open.spotify.com/playlist/...)" autocomplete="off">
+                        <button type="button" class="btn-clear" id="btn-clear" title="Clear input"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <button type="button" id="btn-download" class="btn-primary">
+                        <i class="fa-solid fa-download"></i>
+                        <span>Download MP3s</span>
+                    </button>
+                </div>
+
+                <!-- Accordion / Settings Bar -->
+                <div class="settings-bar">
+                    <div class="setting-item">
+                        <label for="output-path"><i class="fa-regular fa-folder-open"></i> Save Location:</label>
+                        <div class="folder-input-wrap">
+                            <input type="text" id="output-path" value="{{ default_output_dir }}">
+                            <button id="btn-open-folder" title="Open Save Directory" class="btn-secondary">
+                                <i class="fa-solid fa-folder-open"></i> Open Folder
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="setting-item-row">
+                        <div class="setting-item compact">
+                            <label for="audio-format"><i class="fa-solid fa-sliders"></i> Format:</label>
+                            <select id="audio-format">
+                                <option value="mp3" selected>MP3 (.mp3)</option>
+                                <option value="m4a">M4A (.m4a)</option>
+                                <option value="flac">FLAC (.flac)</option>
+                                <option value="wav">WAV (.wav)</option>
+                                <option value="opus">Opus (.opus)</option>
+                                <option value="ogg">Ogg Vorbis (.ogg)</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-item compact">
+                            <label for="audio-bitrate"><i class="fa-solid fa-bolt"></i> Quality:</label>
+                            <select id="audio-bitrate">
+                                <option value="320k" selected>320 kbps (Extreme Quality)</option>
+                                <option value="250k">250 kbps (High Quality)</option>
+                                <option value="192k">192 kbps (Standard Quality)</option>
+                                <option value="128k">128 kbps (Compact Size)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Download Status Panel -->
+            <div class="card progress-card hidden" id="progress-card">
+                <div class="progress-header">
+                    <div class="progress-title">
+                        <div class="spinner hidden" id="dl-spinner"></div>
+                        <i class="fa-solid fa-compact-disc record-spin" id="dl-icon"></i>
+                        <h3 id="status-heading">Downloading Songs...</h3>
+                    </div>
+                    <span class="status-pill" id="status-pill">Active</span>
+                </div>
+
+                <!-- Terminal-style Log Stream -->
+                <div class="log-console" id="log-console">
+                    <div class="log-line info">Ready to process Spotify link...</div>
+                </div>
+            </div>
+
+            <!-- Downloaded Files Manager -->
+            <div class="card files-card">
+                <div class="files-header">
+                    <div class="card-title">
+                        <i class="fa-solid fa-list-check"></i>
+                        <h2>Downloaded Songs Library</h2>
+                    </div>
+                    <button class="btn-secondary" id="btn-refresh-files"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
+                </div>
+
+                <div class="files-list-container">
+                    <table class="files-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Song Name</th>
+                                <th>Size</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="files-tbody">
+                            <tr>
+                                <td colspan="4" class="empty-state">
+                                    <i class="fa-solid fa-music"></i>
+                                    <p>No downloaded songs found in target folder yet.</p>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>Spotify MP3 Library Downloader &bull; Powered by Python &amp; yt-dlp &bull; No API Key Required</p>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const btnDownload = document.getElementById('btn-download');
+            const urlInput = document.getElementById('spotify-url');
+            const btnClear = document.getElementById('btn-clear');
+            const outputPathInput = document.getElementById('output-path');
+            const formatSelect = document.getElementById('audio-format');
+            const bitrateSelect = document.getElementById('audio-bitrate');
+            const btnOpenFolder = document.getElementById('btn-open-folder');
+            const btnRefreshFiles = document.getElementById('btn-refresh-files');
+            
+            const progressCard = document.getElementById('progress-card');
+            const logConsole = document.getElementById('log-console');
+            const statusHeading = document.getElementById('status-heading');
+            const statusPill = document.getElementById('status-pill');
+            const dlSpinner = document.getElementById('dl-spinner');
+            const dlIcon = document.getElementById('dl-icon');
+            const filesTbody = document.getElementById('files-tbody');
+
+            let eventSource = null;
+
+            // Load Config
+            fetch('/api/config')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.default_output_dir && !outputPathInput.value) {
+                        outputPathInput.value = data.default_output_dir;
+                    }
+                    fetchFiles();
+                })
+                .catch(err => console.error(err));
+
+            btnClear.addEventListener('click', () => {
+                urlInput.value = '';
+                urlInput.focus();
+            });
+
+            btnOpenFolder.addEventListener('click', () => {
+                const path = outputPathInput.value;
+                fetch('/api/open_folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: path })
+                });
+            });
+
+            btnRefreshFiles.addEventListener('click', () => {
+                fetchFiles();
+            });
+
+            function fetchFiles() {
+                const dir = outputPathInput.value;
+                fetch(`/api/files?dir=${encodeURIComponent(dir)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        renderFiles(data.files || []);
+                    })
+                    .catch(err => console.error(err));
+            }
+
+            function renderFiles(files) {
+                if (!files || files.length === 0) {
+                    filesTbody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="empty-state">
+                                <i class="fa-solid fa-music"></i>
+                                <p>No downloaded songs found in target folder yet.</p>
+                            </td>
+                        </tr>`;
+                    return;
+                }
+
+                filesTbody.innerHTML = files.map((file, idx) => `
+                    <tr>
+                        <td class="col-num">${idx + 1}</td>
+                        <td class="col-name"><i class="fa-solid fa-file-audio"></i> ${escapeHtml(file.name)}</td>
+                        <td class="col-size">${file.size_mb} MB</td>
+                        <td class="col-status"><span class="badge-success"><i class="fa-solid fa-check"></i> Ready</span></td>
+                    </tr>
+                `).join('');
+            }
+
+            function escapeHtml(text) {
+                return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            }
+
+            btnDownload.addEventListener('click', startDownload);
+
+            urlInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') startDownload();
+            });
+
+            function startDownload() {
+                const url = urlInput.value.trim();
+                if (!url) {
+                    alert('Please enter a Spotify URL!');
+                    urlInput.focus();
+                    return;
+                }
+
+                btnDownload.disabled = true;
+                btnDownload.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing...';
+                
+                progressCard.classList.remove('hidden');
+                logConsole.innerHTML = '<div class="log-line info">Starting downloader thread...</div>';
+                statusHeading.innerText = 'Connecting to Spotify & YouTube...';
+                statusPill.className = 'status-pill status-active';
+                statusPill.innerText = 'Processing';
+                dlSpinner.classList.remove('hidden');
+                dlIcon.classList.add('record-spin');
+
+                if (eventSource) {
+                    eventSource.close();
+                }
+
+                fetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: url,
+                        output_dir: outputPathInput.value.trim(),
+                        format: formatSelect.value,
+                        bitrate: bitrateSelect.value
+                    })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) {
+                        alert(data.error);
+                        resetButton();
+                        return;
+                    }
+
+                    const dlId = data.download_id;
+                    listenToStream(dlId);
+                })
+                .catch(err => {
+                    alert('Failed to start download: ' + err);
+                    resetButton();
+                });
+            }
+
+            function listenToStream(dlId) {
+                eventSource = new EventSource(`/api/stream/${dlId}`);
+
+                eventSource.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'ping') return;
+
+                    if (data.message) {
+                        const line = document.createElement('div');
+                        line.className = 'log-line';
+
+                        if (data.message.includes('Downloaded')) {
+                            line.classList.add('success');
+                        } else if (data.message.includes('Skipping') || data.message.includes('Already exists')) {
+                            line.classList.add('warning');
+                        } else if (data.message.includes('Error') || data.message.includes('❌')) {
+                            line.classList.add('error');
+                        } else if (data.message.includes('🚀') || data.message.includes('Searching')) {
+                            line.classList.add('highlight');
+                        }
+
+                        line.innerText = data.message;
+                        logConsole.appendChild(line);
+                        logConsole.scrollTop = logConsole.scrollHeight;
+                    }
+
+                    if (data.type === 'complete') {
+                        statusHeading.innerText = 'Download Complete!';
+                        statusPill.className = 'status-pill status-done';
+                        statusPill.innerText = 'Completed';
+                        dlSpinner.classList.add('hidden');
+                        dlIcon.classList.remove('record-spin');
+                        resetButton();
+                        fetchFiles();
+                        eventSource.close();
+                    } else if (data.type === 'error') {
+                        statusHeading.innerText = 'Download Encountered Errors';
+                        statusPill.className = 'status-pill status-failed';
+                        statusPill.innerText = 'Failed';
+                        dlSpinner.classList.add('hidden');
+                        resetButton();
+                        eventSource.close();
+                    } else if (data.type === 'EOF') {
+                        eventSource.close();
+                        resetButton();
+                        fetchFiles();
+                    }
+                };
+
+                eventSource.onerror = (err) => {
+                    eventSource.close();
+                    resetButton();
+                };
+            }
+
+            function resetButton() {
+                btnDownload.disabled = false;
+                btnDownload.innerHTML = '<i class="fa-solid fa-download"></i> <span>Download MP3s</span>';
+            }
+        });
+    </script>
+</body>
+</html>

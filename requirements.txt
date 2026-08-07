@@ -1,0 +1,6 @@
+spotdl>=4.2.0
+flask>=3.0.0
+flask-cors>=4.0.0
+yt-dlp>=2024.0.0
+mutagen>=1.47.0
+requests>=2.31.0
