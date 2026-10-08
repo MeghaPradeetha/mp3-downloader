@@ -92,7 +92,7 @@ def download_single_track(track, output_dir, audio_format="mp3", bitrate="320k",
         "no_warnings": True,
         "extract_flat": False,
         "default_search": "ytsearch1",  # Search YouTube for first result
-        "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
+        "extractor_args": {"youtube": {"player_client": ["android"]}},
         "ffmpeg_location": ffmpeg_dir,
         "writethumbnail": True,
         "postprocessors": [
@@ -125,15 +125,21 @@ def download_single_track(track, output_dir, audio_format="mp3", bitrate="320k",
             f"ytsearch1:{search_query}",
         ]
         
+        fallback_clients = [["android"], ["mweb"]]
         downloaded = False
-        for sq in search_queries:
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([sq])
-                downloaded = True
+        for client in fallback_clients:
+            ydl_opts["extractor_args"] = {"youtube": {"player_client": client}}
+            for sq in search_queries:
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([sq])
+                    if os.path.exists(output_path):
+                        downloaded = True
+                        break
+                except Exception:
+                    continue
+            if downloaded:
                 break
-            except Exception:
-                continue
         
         if downloaded and os.path.exists(output_path):
             msg = f"✅ {progress_prefix} Downloaded: {safe_filename}"

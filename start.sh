@@ -10,13 +10,18 @@ echo "  🎵 Spotify MP3 Downloader Quick Launcher 🎵"
 echo "================================================"
 
 # Check Python environment
-if [ ! -d ".venv" ]; then
-    echo "⚙️ Creating Python virtual environment (.venv)..."
-    python3 -m venv .venv
+if [ -d "venv" ]; then
+    VENV_PATH="venv"
+elif [ -d ".venv" ]; then
+    VENV_PATH=".venv"
+else
+    echo "⚙️ Creating Python virtual environment (venv)..."
+    python3 -m venv venv
+    VENV_PATH="venv"
 fi
 
 echo "📦 Verifying dependencies..."
-.venv/bin/pip install -r requirements.txt > /dev/null 2>&1
+$VENV_PATH/bin/pip install -r requirements.txt > /dev/null 2>&1
 
 chmod +x download.py app.py
 
@@ -31,12 +36,12 @@ choice=${choice:-1}
 if [ "$choice" = "1" ]; then
     echo "🟢 Starting Web Dashboard..."
     echo "👉 Open http://localhost:5050 in your browser"
-    .venv/bin/python app.py
+    $VENV_PATH/bin/python app.py
 else
     read -p "Enter Spotify URL: " spotify_url
     if [ -z "$spotify_url" ]; then
         echo "No URL provided. Exiting."
         exit 1
     fi
-    .venv/bin/python download.py "$spotify_url"
+    $VENV_PATH/bin/python download.py "$spotify_url"
 fi
