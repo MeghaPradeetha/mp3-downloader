@@ -29,6 +29,10 @@ from spotify_scraper import get_spotify_tracks
 DEFAULT_OUTPUT_DIR = os.path.join(os.getcwd(), "downloads")
 
 
+class DownloadCancelled(Exception):
+    """Signal that the user requested a download stop."""
+
+
 def check_and_install_ffmpeg(venv_bin_dir=None):
     """Ensure ffmpeg is available either on system PATH or in ~/.spotdl/."""
     home = os.path.expanduser("~")
@@ -58,8 +62,11 @@ def sanitize_filename(name):
     return name[:200]  # Limit length
 
 
-def download_single_track(track, output_dir, audio_format="mp3", bitrate="320k", track_num=None, total=None, progress_callback=None):
+def download_single_track(track, output_dir, audio_format="mp3", bitrate="320k", track_num=None, total=None, progress_callback=None, cancel_event=None):
     """Download a single track from YouTube Music using yt-dlp."""
+    if cancel_event and cancel_event.is_set():
+        raise DownloadCancelled()
+
     artist = track.get("artist", "Unknown")
     title = track.get("title", "Unknown")
     search_query = f"{artist} - {title}"
@@ -111,6 +118,13 @@ def download_single_track(track, output_dir, audio_format="mp3", bitrate="320k",
             "-metadata", f"artist={artist}",
         ],
     }
+
+    if cancel_event:
+        def check_cancelled(_status):
+            if cancel_event.is_set():
+                raise DownloadCancelled()
+
+        ydl_opts["progress_hooks"] = [check_cancelled]
     
     # Add album metadata if available
     album = track.get("album", "")
@@ -128,14 +142,20 @@ def download_single_track(track, output_dir, audio_format="mp3", bitrate="320k",
         fallback_clients = [["android"], ["mweb"]]
         downloaded = False
         for client in fallback_clients:
+            if cancel_event and cancel_event.is_set():
+                raise DownloadCancelled()
             ydl_opts["extractor_args"] = {"youtube": {"player_client": client}}
             for sq in search_queries:
+                if cancel_event and cancel_event.is_set():
+                    raise DownloadCancelled()
                 try:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         ydl.download([sq])
                     if os.path.exists(output_path):
                         downloaded = True
                         break
+                except DownloadCancelled:
+                    raise
                 except Exception:
                     continue
             if downloaded:
@@ -154,6 +174,8 @@ def download_single_track(track, output_dir, audio_format="mp3", bitrate="320k",
                 progress_callback(msg)
             return {"status": "failed", "track": search_query}
             
+    except DownloadCancelled:
+        raise
     except Exception as e:
         msg = f"❌ {progress_prefix} Error downloading {search_query}: {str(e)}"
         print(msg)
@@ -163,11 +185,14 @@ def download_single_track(track, output_dir, audio_format="mp3", bitrate="320k",
 
 
 def download_spotify_url(url, output_dir=DEFAULT_OUTPUT_DIR, audio_format="mp3", bitrate="320k", 
-                         client_id=None, client_secret=None, progress_callback=None):
+                         client_id=None, client_secret=None, progress_callback=None, cancel_event=None):
     """
     Downloads Spotify tracks, playlists, or albums.
     No Spotify API key required - uses public embed scraping + yt-dlp.
     """
+    if cancel_event and cancel_event.is_set():
+        raise DownloadCancelled()
+
     os.makedirs(output_dir, exist_ok=True)
     check_and_install_ffmpeg()
 
@@ -215,10 +240,13 @@ def download_spotify_url(url, output_dir=DEFAULT_OUTPUT_DIR, audio_format="mp3",
     results = {"success": 0, "failed": 0, "skipped": 0}
     
     for i, track in enumerate(tracks, 1):
+        if cancel_event and cancel_event.is_set():
+            raise DownloadCancelled()
         r = download_single_track(
             track, output_dir, audio_format, bitrate, 
             track_num=i, total=total, 
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            cancel_event=cancel_event
         )
         results[r["status"]] = results.get(r["status"], 0) + 1
 

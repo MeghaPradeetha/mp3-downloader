@@ -347,6 +347,64 @@ body {
     font-weight: 600;
 }
 
+.progress-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.btn-cancel {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 11px;
+    border: 1px solid rgba(255, 75, 75, 0.45);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 75, 75, 0.1);
+    color: var(--accent-red);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.btn-cancel:hover:not(:disabled) {
+    background: rgba(255, 75, 75, 0.2);
+}
+
+.btn-cancel:disabled {
+    cursor: wait;
+    opacity: 0.7;
+}
+
+.track-progress {
+    margin: 0 0 14px;
+}
+
+.track-progress-label {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 7px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.track-progress-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.track-progress-fill {
+    width: 0%;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary);
+    transition: width 250ms ease;
+}
+
 .record-spin {
     font-size: 20px;
     color: var(--primary);
@@ -380,6 +438,11 @@ body {
 .status-failed {
     background: rgba(255, 75, 75, 0.2);
     color: var(--accent-red);
+}
+
+.status-cancelled {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
 }
 
 .log-console {

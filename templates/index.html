@@ -101,7 +101,24 @@
                         <i class="fa-solid fa-compact-disc record-spin" id="dl-icon"></i>
                         <h3 id="status-heading">Downloading Songs...</h3>
                     </div>
-                    <span class="status-pill" id="status-pill">Active</span>
+                    <div class="progress-actions">
+                        <button type="button" class="btn-cancel hidden" id="btn-cancel-download" disabled>
+                            <i class="fa-solid fa-stop"></i>
+                            <span>Stop</span>
+                        </button>
+                        <span class="status-pill" id="status-pill">Active</span>
+                    </div>
+                </div>
+
+                <div class="track-progress" aria-live="polite">
+                    <div class="track-progress-label">
+                        <span id="track-progress-text">Preparing playlist...</span>
+                        <span id="track-progress-percent">0%</span>
+                    </div>
+                    <div class="track-progress-track" id="track-progress-track" role="progressbar"
+                         aria-label="Tracks processed" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <div class="track-progress-fill" id="track-progress-fill"></div>
+                    </div>
                 </div>
 
                 <!-- Terminal-style Log Stream -->
@@ -160,6 +177,7 @@
             const btnBrowse = document.getElementById('btn-browse');
             const btnOpenFolder = document.getElementById('btn-open-folder');
             const btnRefreshFiles = document.getElementById('btn-refresh-files');
+            const btnCancelDownload = document.getElementById('btn-cancel-download');
             
             const progressCard = document.getElementById('progress-card');
             const logConsole = document.getElementById('log-console');
@@ -168,8 +186,13 @@
             const dlSpinner = document.getElementById('dl-spinner');
             const dlIcon = document.getElementById('dl-icon');
             const filesTbody = document.getElementById('files-tbody');
+            const trackProgressText = document.getElementById('track-progress-text');
+            const trackProgressPercent = document.getElementById('track-progress-percent');
+            const trackProgressTrack = document.getElementById('track-progress-track');
+            const trackProgressFill = document.getElementById('track-progress-fill');
 
             let eventSource = null;
+            let currentDownloadId = null;
 
             // Load Config
             fetch('/api/config')
@@ -261,6 +284,7 @@
             }
 
             btnDownload.addEventListener('click', startDownload);
+            btnCancelDownload.addEventListener('click', stopDownload);
 
             urlInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') startDownload();
@@ -276,9 +300,13 @@
 
                 btnDownload.disabled = true;
                 btnDownload.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing...';
+                btnCancelDownload.disabled = true;
+                btnCancelDownload.classList.remove('hidden');
+                btnCancelDownload.innerHTML = '<i class="fa-solid fa-stop"></i><span>Stop</span>';
                 
                 progressCard.classList.remove('hidden');
                 logConsole.innerHTML = '<div class="log-line info">Starting downloader thread...</div>';
+                updateTrackProgress(0, 0);
                 statusHeading.innerText = 'Connecting to Spotify & YouTube...';
                 statusPill.className = 'status-pill status-active';
                 statusPill.innerText = 'Processing';
@@ -308,6 +336,8 @@
                     }
 
                     const dlId = data.download_id;
+                    currentDownloadId = dlId;
+                    btnCancelDownload.disabled = false;
                     listenToStream(dlId);
                 })
                 .catch(err => {
@@ -322,6 +352,14 @@
                 eventSource.onmessage = (event) => {
                     const data = JSON.parse(event.data);
                     if (data.type === 'ping') return;
+
+                    if (data.type === 'progress') {
+                        updateTrackProgress(data.completed, data.total, data.track, data.finished);
+                    }
+
+                    if (data.type === 'cancelling') {
+                        setStoppingState();
+                    }
 
                     if (data.message) {
                         const line = document.createElement('div');
@@ -351,6 +389,15 @@
                         resetButton();
                         fetchFiles();
                         eventSource.close();
+                    } else if (data.type === 'cancelled') {
+                        statusHeading.innerText = 'Download Stopped';
+                        statusPill.className = 'status-pill status-cancelled';
+                        statusPill.innerText = 'Stopped';
+                        dlSpinner.classList.add('hidden');
+                        dlIcon.classList.remove('record-spin');
+                        resetButton();
+                        fetchFiles();
+                        eventSource.close();
                     } else if (data.type === 'error') {
                         statusHeading.innerText = 'Download Encountered Errors';
                         statusPill.className = 'status-pill status-failed';
@@ -371,9 +418,55 @@
                 };
             }
 
+            function stopDownload() {
+                if (!currentDownloadId || btnCancelDownload.disabled) return;
+                btnCancelDownload.disabled = true;
+                setStoppingState();
+
+                fetch(`/api/download/${currentDownloadId}/cancel`, { method: 'POST' })
+                    .then(async response => {
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || 'Unable to stop download');
+                    })
+                    .catch(error => {
+                        console.error(error);
+                        btnCancelDownload.disabled = false;
+                        btnCancelDownload.innerHTML = '<i class="fa-solid fa-stop"></i><span>Stop</span>';
+                    });
+            }
+
+            function setStoppingState() {
+                statusHeading.innerText = 'Stopping download...';
+                statusPill.className = 'status-pill status-active';
+                statusPill.innerText = 'Stopping';
+                btnCancelDownload.disabled = true;
+                btnCancelDownload.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Stopping...</span>';
+            }
+
+            function updateTrackProgress(completed, total, track, finished = false) {
+                if (!total) {
+                    trackProgressText.innerText = 'Preparing playlist...';
+                    trackProgressPercent.innerText = '0%';
+                    trackProgressTrack.setAttribute('aria-valuenow', '0');
+                    trackProgressFill.style.width = '0%';
+                    return;
+                }
+
+                const percent = Math.round((completed / total) * 100);
+                trackProgressText.innerText = finished
+                    ? `${completed} of ${total} tracks processed`
+                    : `Processing track ${track} of ${total}`;
+                trackProgressPercent.innerText = `${percent}%`;
+                trackProgressTrack.setAttribute('aria-valuenow', String(percent));
+                trackProgressFill.style.width = `${percent}%`;
+            }
+
             function resetButton() {
                 btnDownload.disabled = false;
                 btnDownload.innerHTML = '<i class="fa-solid fa-download"></i> <span>Download MP3s</span>';
+                btnCancelDownload.disabled = true;
+                btnCancelDownload.classList.add('hidden');
+                currentDownloadId = null;
             }
         });
     </script>

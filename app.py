@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import queue
+import re
 import threading
 import subprocess
 from pathlib import Path
@@ -24,7 +25,7 @@ yt_dlp.YoutubeDL.deprecated_feature = _patched_deprecated
 from flask import Flask, render_template, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
 
-from download import check_and_install_ffmpeg, download_spotify_url, DEFAULT_OUTPUT_DIR
+from download import DownloadCancelled, check_and_install_ffmpeg, download_spotify_url, DEFAULT_OUTPUT_DIR
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 CORS(app)
@@ -32,6 +33,7 @@ CORS(app)
 # Global queue and active download state tracking
 active_downloads = {}
 log_queues = {}
+download_cancellations = {}
 
 def sanitize_url(url):
     return url.strip()
@@ -61,6 +63,8 @@ def start_download():
     download_id = f"dl_{len(active_downloads) + 1}"
     log_q = queue.Queue()
     log_queues[download_id] = log_q
+    cancel_event = threading.Event()
+    download_cancellations[download_id] = cancel_event
 
     download_info = {
         "id": download_id,
@@ -75,12 +79,36 @@ def start_download():
     }
     active_downloads[download_id] = download_info
 
-    def run_download_thread(dl_id, target_url, out_dir, fmt, b_rate, q):
+    def run_download_thread(dl_id, target_url, out_dir, fmt, b_rate, q, stop_event):
         """Run download in background thread with real-time log streaming."""
+        completed_tracks = set()
+        if not stop_event.is_set():
+            active_downloads[dl_id]["status"] = "running"
         
         def progress_cb(message):
             active_downloads[dl_id]["logs"].append(message)
             q.put(json.dumps({"type": "log", "message": message}))
+
+            track_match = re.search(r"\[(\d+)/(\d+)\]", message)
+            if not track_match:
+                return
+
+            track_num, total = map(int, track_match.groups())
+            active_downloads[dl_id]["total_count"] = total
+            is_finished = any(marker in message for marker in (
+                "Downloaded:", "Already exists:", "Failed:", "Error downloading"
+            ))
+            if is_finished:
+                completed_tracks.add(track_num)
+                active_downloads[dl_id]["completed_count"] = len(completed_tracks)
+
+            q.put(json.dumps({
+                "type": "progress",
+                "completed": len(completed_tracks),
+                "total": total,
+                "track": track_num,
+                "finished": is_finished
+            }))
 
         q.put(json.dumps({"type": "status", "message": f"🚀 Starting download for {target_url}"}))
         q.put(json.dumps({"type": "log", "message": "🔓 No Spotify API key needed — using public embed scraping!"}))
@@ -91,8 +119,12 @@ def start_download():
                 output_dir=out_dir,
                 audio_format=fmt,
                 bitrate=b_rate,
-                progress_callback=progress_cb
+                progress_callback=progress_cb,
+                cancel_event=stop_event
             )
+
+            if stop_event.is_set():
+                raise DownloadCancelled()
 
             if result.get("success"):
                 active_downloads[dl_id]["status"] = "completed"
@@ -110,13 +142,16 @@ def start_download():
                     "message": f"❌ Download failed: {result.get('error', 'Unknown error')}"
                 }))
 
+        except DownloadCancelled:
+            active_downloads[dl_id]["status"] = "cancelled"
+            q.put(json.dumps({"type": "cancelled", "message": "⏹ Download stopped"}))
         except Exception as e:
             active_downloads[dl_id]["status"] = "failed"
             q.put(json.dumps({"type": "error", "message": f"❌ Failed: {str(e)}"}))
         finally:
             q.put(json.dumps({"type": "EOF"}))
 
-    t = threading.Thread(target=run_download_thread, args=(download_id, url, output_dir, audio_format, bitrate, log_q))
+    t = threading.Thread(target=run_download_thread, args=(download_id, url, output_dir, audio_format, bitrate, log_q, cancel_event))
     t.daemon = True
     t.start()
 
@@ -125,6 +160,23 @@ def start_download():
         "download_id": download_id,
         "info": download_info
     })
+
+@app.route("/api/download/<download_id>/cancel", methods=["POST"])
+def cancel_download(download_id):
+    download_info = active_downloads.get(download_id)
+    cancel_event = download_cancellations.get(download_id)
+    if not download_info or not cancel_event:
+        return jsonify({"error": "Download not found"}), 404
+    if download_info["status"] not in ("starting", "running", "cancelling"):
+        return jsonify({"error": "Download is not active"}), 409
+
+    download_info["status"] = "cancelling"
+    cancel_event.set()
+    log_queues[download_id].put(json.dumps({
+        "type": "cancelling",
+        "message": "⏹ Stop requested; cancelling current track..."
+    }))
+    return jsonify({"success": True})
 
 @app.route("/api/stream/<download_id>")
 def stream_logs(download_id):
