@@ -531,3 +531,111 @@ body {
     color: var(--text-muted);
     padding: 10px 0;
 }
+
+.mega-page {
+    align-items: flex-start;
+    padding-top: clamp(24px, 5vw, 60px);
+}
+
+.mega-page .app-header {
+    flex-wrap: wrap;
+    gap: 14px;
+}
+
+.mega-nav {
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.mega-form {
+    display: grid;
+    gap: 20px;
+}
+
+.mega-fields {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.mega-form input,
+.mega-form textarea,
+.mega-form select {
+    width: 100%;
+    color: var(--text-main);
+    background: var(--bg-dark);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    font: inherit;
+    color-scheme: dark;
+}
+
+.mega-form textarea {
+    resize: vertical;
+}
+
+.mega-form input:focus-visible,
+.mega-form textarea:focus-visible,
+.mega-form select:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+.mega-form .btn-primary {
+    justify-self: start;
+}
+
+.mega-setup {
+    border-top: 1px solid var(--card-border);
+    padding-top: 16px;
+    display: grid;
+    gap: 8px;
+}
+
+.mega-hint {
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
+.mega-hint a {
+    color: var(--primary-hover);
+}
+
+.mega-error {
+    color: var(--accent-red);
+}
+
+#mega-log {
+    margin-top: 12px;
+    background: var(--bg-dark);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+@media (max-width: 680px) {
+    .mega-fields {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 440px) {
+    .mega-fields {
+        grid-template-columns: 1fr;
+    }
+}
+
+.mega-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.mega-controls button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}

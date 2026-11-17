@@ -1,0 +1,78 @@
+            <form id="mega-form" class="card mega-form">
+                <div class="card-title">
+                    <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+                    <h2>MEGA Music Bot</h2>
+                </div>
+                <div class="setting-item">
+                    <label for="mega-destinations">MEGA folders</label>
+                    <textarea id="mega-destinations" name="destinations" rows="3" required
+                        placeholder="https://mega.nz/folder/…&#10;/Music Backup" aria-describedby="mega-destinations-hint">{{ default_destinations }}</textarea>
+                    <p id="mega-destinations-hint" class="mega-hint">The bot uploads to <strong>MEGA folder → Artist name → Songs</strong>. Add another folder link or cloud path on a new line.</p>
+                </div>
+
+                <div class="mega-fields">
+                    <div class="setting-item">
+                        <label for="mega-country">Artist country</label>
+                        <input id="mega-country" name="country" type="text" maxlength="3" pattern="[A-Za-z]{3}" placeholder="Any · LKA, IND, USA">
+                    </div>
+                    <div class="setting-item">
+                        <label for="mega-genre">Genre</label>
+                        <input id="mega-genre" name="genre" list="mega-genres" placeholder="Any genre">
+                        <datalist id="mega-genres">
+                            <option value="Pop"></option>
+                            <option value="Hip hop"></option>
+                            <option value="Rock"></option>
+                            <option value="Electronic"></option>
+                            <option value="Jazz"></option>
+                            <option value="Classical"></option>
+                            <option value="Metal"></option>
+                            <option value="World"></option>
+                        </datalist>
+                    </div>
+                    <div class="setting-item">
+                        <label for="mega-category">Track category</label>
+                        <select id="mega-category" name="category">
+                            <option value="all">Singles and album tracks</option>
+                            <option value="single">Singles</option>
+                            <option value="albumtrack">Album tracks</option>
+                        </select>
+                    </div>
+                    <div class="setting-item">
+                        <label for="mega-artist">Artist name</label>
+                        <input id="mega-artist" name="artist" placeholder="Pick automatically">
+                    </div>
+                    <div class="setting-item">
+                        <label for="mega-limit">Maximum tracks</label>
+                        <input id="mega-limit" name="limit" type="number" min="1" value="20" required>
+                    </div>
+                    <div class="setting-item">
+                        <label for="mega-storage">Account storage limit (GB)</label>
+                        <input id="mega-storage" name="storage" type="number" min="0.000000001" step="any" placeholder="Use MEGA quota">
+                    </div>
+                </div>
+
+                <div class="mega-setup">
+                    {% if not jamendo_configured %}
+                    <div class="setting-item">
+                        <label for="mega-client">Jamendo Client ID</label>
+                        <input id="mega-client" name="client_id" type="password" autocomplete="off" required>
+                    </div>
+                    {% endif %}
+                    <p class="mega-hint">Sign in through <a href="https://github.com/meganz/MEGAcmd">MEGAcmd</a>. {% if not jamendo_configured %}Get a Client ID from <a href="https://devportal.jamendo.com/">Jamendo</a>.{% endif %}</p>
+                </div>
+
+                <div class="mega-controls">
+                    <button id="mega-run" class="btn-primary" type="submit">Start Bot</button>
+                    <button id="mega-pause" class="btn-secondary" type="button" disabled>Pause</button>
+                    <button id="mega-end" class="btn-secondary" type="button" disabled>End</button>
+                </div>
+                <p id="mega-error" class="mega-error" role="alert" hidden></p>
+            </form>
+
+            <section class="card" aria-labelledby="mega-activity">
+                <div class="card-title">
+                    <h2 id="mega-activity">Upload activity</h2>
+                </div>
+                <p id="mega-status" role="status" class="mega-hint">Ready to run.</p>
+                <pre id="mega-log" tabindex="0" aria-label="Upload log" hidden></pre>
+            </section>

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Startup script for Spotify MP3 Library Downloader
+# Startup script for MP3 BOT
 
 PROJECT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 CD_CMD="cd \"$PROJECT_DIR\""
 eval $CD_CMD
 
 echo "================================================"
-echo "  🎵 Spotify MP3 Downloader Quick Launcher 🎵"
+echo "  🎵 MP3 BOT Quick Launcher 🎵"
 echo "================================================"
 
 # Check Python environment
@@ -38,7 +38,7 @@ if [ "$choice" = "1" ]; then
     echo "👉 Open http://localhost:5050 in your browser"
     $VENV_PATH/bin/python app.py
 else
-    read -p "Enter Spotify URL: " spotify_url
+    read -p "Enter media link: " spotify_url
     if [ -z "$spotify_url" ]; then
         echo "No URL provided. Exiting."
         exit 1

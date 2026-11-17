@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Flask Web Application for Spotify MP3 Library Downloader
-No Spotify API key or Premium required - uses public embed scraping + yt-dlp.
+Flask web application for MP3 BOT.
 """
 
 import os
@@ -11,7 +10,9 @@ import queue
 import re
 import threading
 import subprocess
+from collections import deque
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yt_dlp
 # Patch yt-dlp to bypass Python 3.9 deprecation warning exception
@@ -34,13 +35,143 @@ CORS(app)
 active_downloads = {}
 log_queues = {}
 download_cancellations = {}
+mega_state_lock = threading.Lock()
+mega_state = {"status": "idle", "logs": deque(maxlen=200), "process": None}
 
 def sanitize_url(url):
     return url.strip()
 
 @app.route("/")
+@app.route("/downloads")
 def index():
-    return render_template("index.html", default_output_dir=DEFAULT_OUTPUT_DIR)
+    default_destinations = ""
+    if local_mega_request():
+        try:
+            default_destinations = Path(app.instance_path, "mega-destinations.txt").read_text(
+                encoding="utf-8",
+            ).strip()
+        except FileNotFoundError:
+            pass
+    response = app.make_response(render_template(
+        "index.html", default_output_dir=DEFAULT_OUTPUT_DIR,
+        jamendo_configured=bool(jamendo_client_id()),
+        default_destinations=default_destinations,
+    ))
+    response.cache_control.no_store = True
+    return response
+
+def local_mega_request():
+    return (
+        request.remote_addr in ("127.0.0.1", "::1")
+        and urlsplit(request.host_url).hostname in ("localhost", "127.0.0.1", "::1")
+        and request.headers.get("Origin", request.host_url.rstrip("/")) == request.host_url.rstrip("/")
+    )
+
+def jamendo_client_id():
+    configured = os.environ.get("JAMENDO_CLIENT_ID", "").strip()
+    if configured:
+        return configured
+    try:
+        return Path(app.instance_path, "jamendo-client-id.txt").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+
+@app.get("/api/mega")
+def mega_status():
+    if not local_mega_request():
+        return jsonify(error="Open the dashboard on localhost to use MEGA."), 403
+    with mega_state_lock:
+        return jsonify(status=mega_state["status"], logs=list(mega_state["logs"]))
+
+@app.post("/api/mega")
+def start_mega():
+    if not local_mega_request():
+        return jsonify(error="Open the dashboard on localhost to use MEGA."), 403
+    data = request.get_json(silent=True)
+    fields = ("destinations", "country", "genre", "artist", "category", "limit", "storage", "client_id")
+    if not isinstance(data, dict) or any(not isinstance(data.get(field, ""), str) for field in fields):
+        return jsonify(error="Invalid bot settings."), 400
+    destinations = [line.strip() for line in data.get("destinations", "").splitlines() if line.strip()]
+    if not destinations or any(not line.startswith(("/", "https://")) for line in destinations):
+        return jsonify(error="Enter a MEGA folder link or cloud path on each line."), 400
+    client_id = data.get("client_id", "").strip() or jamendo_client_id()
+    if not client_id:
+        return jsonify(error="Enter your Jamendo Client ID to search for music."), 400
+
+    command = [sys.executable, "-u", str(Path(__file__).with_name("mega_bot.py")), "--dashboard-control", "--dest", *destinations]
+    for field, flag in (
+        ("country", "country"), ("genre", "genre"), ("artist", "artist"),
+        ("category", "category"), ("limit", "limit"), ("storage", "max-storage-gb"),
+    ):
+        value = data.get(field, "").strip()
+        if value:
+            command.append(f"--{flag}={value}")
+    env = {**os.environ, "JAMENDO_CLIENT_ID": client_id}
+    mac_mega = Path("/Applications/MEGAcmd.app/Contents/MacOS")
+    if mac_mega.is_dir():
+        env["PATH"] = os.pathsep.join((str(mac_mega), os.environ.get("PATH", os.defpath)))
+
+    def run_bot(process):
+        status = "failed"
+        try:
+            with process:
+                for line in process.stdout:
+                    if line.rstrip() == "[bot paused]":
+                        with mega_state_lock:
+                            if mega_state["status"] == "pausing":
+                                mega_state["status"] = "paused"
+                        continue
+                    message = line.rstrip().replace(client_id, "[Client ID]")
+                    for destination in destinations:
+                        if destination.startswith("https://"):
+                            message = message.replace(destination, "[MEGA link]")
+                    with mega_state_lock:
+                        mega_state["logs"].append(message)
+                status = {0: "finished", 130: "ended"}.get(process.wait(), "failed")
+        finally:
+            with mega_state_lock:
+                mega_state.update(status=status, process=None)
+
+    with mega_state_lock:
+        if mega_state["process"] is not None:
+            return jsonify(error="The MEGA bot is already running."), 409
+        try:
+            process = subprocess.Popen(
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.PIPE, text=True, errors="replace", env=env,
+            )
+        except (OSError, ValueError):
+            return jsonify(error="Could not start the MEGA bot."), 500
+        mega_state["logs"].clear()
+        mega_state.update(status="running", process=process)
+        threading.Thread(target=run_bot, args=(process,), daemon=True).start()
+    return jsonify(status="running"), 202
+
+
+@app.post("/api/mega/<action>")
+def control_mega(action):
+    if not local_mega_request():
+        return jsonify(error="Open the dashboard on localhost to use MEGA."), 403
+    transitions = {
+        "pause": (("running",), "pausing"),
+        "resume": (("paused",), "running"),
+        "end": (("running", "pausing", "paused"), "ending"),
+    }
+    if action not in transitions or not request.is_json:
+        return jsonify(error="Invalid bot action."), 400
+    allowed, next_status = transitions[action]
+    with mega_state_lock:
+        process = mega_state["process"]
+        if process is None or mega_state["status"] not in allowed:
+            return jsonify(error="This action is unavailable for the current run."), 409
+        try:
+            process.stdin.write(action + "\n")
+            process.stdin.flush()
+        except (OSError, ValueError):
+            return jsonify(error="The bot has already exited."), 409
+        mega_state["status"] = next_status
+    return jsonify(status=next_status)
+
 
 @app.route("/api/config", methods=["GET"])
 def get_config():
@@ -58,7 +189,7 @@ def start_download():
     bitrate = data.get("bitrate", "320k")
 
     if not url:
-        return jsonify({"error": "Spotify URL is required"}), 400
+        return jsonify({"error": "A media link is required"}), 400
 
     download_id = f"dl_{len(active_downloads) + 1}"
     log_q = queue.Queue()
@@ -111,7 +242,7 @@ def start_download():
             }))
 
         q.put(json.dumps({"type": "status", "message": f"🚀 Starting download for {target_url}"}))
-        q.put(json.dumps({"type": "log", "message": "🔓 No Spotify API key needed — using public embed scraping!"}))
+        q.put(json.dumps({"type": "log", "message": "Finding tracks for the supplied link."}))
 
         try:
             result = download_spotify_url(
@@ -283,7 +414,6 @@ if __name__ == "__main__":
     requested_port = int(os.environ.get("PORT", 5050))
     port = find_available_port(requested_port)
     
-    print(f"🟢 Starting Spotify Downloader Web App on http://localhost:{port}")
-    print(f"🔓 No Spotify API key or Premium required!")
+    print(f"Starting MP3 BOT on http://localhost:{port}")
     app.run(host="0.0.0.0", port=port, debug=False)
 

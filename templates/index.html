@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify MP3 Downloader</title>
+    <title>MP3 BOT</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -18,32 +18,33 @@
         <header class="app-header">
             <div class="brand">
                 <div class="logo-icon">
-                    <i class="fa-brands fa-spotify"></i>
+                    <i class="fa-solid fa-music"></i>
                 </div>
                 <div>
-                    <h1>Spotify MP3 Downloader</h1>
-                    <p class="subtitle">Download Playlists, Albums, Songs & Discographies with full HD Tags</p>
+                    <h1>MP3 BOT</h1>
+                    <p class="subtitle">Upload music to MEGA or save MP3s locally.</p>
                 </div>
             </div>
             <div class="header-badges">
+                <a class="btn-secondary mega-nav" href="#mega-form">MEGA Music Bot</a>
                 <span class="badge" id="ffmpeg-status"><i class="fa-solid fa-circle-check"></i> FFmpeg Ready</span>
                 <span class="badge quality-badge"><i class="fa-solid fa-music"></i> 320 kbps MP3</span>
-                <span class="badge" style="background:rgba(29,185,84,0.15);color:#1ed760;"><i class="fa-solid fa-lock-open"></i> No API Key Needed</span>
             </div>
         </header>
 
         <!-- Main Card -->
         <main class="main-content">
+            {% include "mega.html" %}
             <div class="card download-card">
                 <div class="card-title">
                     <i class="fa-solid fa-link"></i>
-                    <h2>Spotify Media Link</h2>
+                    <h2>Media Link</h2>
                 </div>
                 
                 <div class="input-group">
                     <div class="input-wrapper">
-                        <i class="fa-brands fa-spotify input-icon"></i>
-                        <input type="text" id="spotify-url" placeholder="Paste Spotify Playlist, Album, Track, or Artist Link (e.g. https://open.spotify.com/playlist/...)" autocomplete="off">
+                        <i class="fa-solid fa-music input-icon"></i>
+                        <input type="text" id="media-url" placeholder="Paste a playlist, album, track, or artist link" autocomplete="off">
                         <button type="button" class="btn-clear" id="btn-clear" title="Clear input"><i class="fa-solid fa-xmark"></i></button>
                     </div>
                     <button type="button" id="btn-download" class="btn-primary">
@@ -123,7 +124,7 @@
 
                 <!-- Terminal-style Log Stream -->
                 <div class="log-console" id="log-console">
-                    <div class="log-line info">Ready to process Spotify link...</div>
+                    <div class="log-line info">Ready to process a media link.</div>
                 </div>
             </div>
 
@@ -162,14 +163,15 @@
 
         <!-- Footer -->
         <footer class="app-footer">
-            <p>Spotify MP3 Library Downloader &bull; Powered by Python &amp; yt-dlp &bull; No API Key Required</p>
+            <p>MP3 BOT</p>
         </footer>
     </div>
 
+    <script src="{{ url_for('static', filename='mega.js') }}" defer></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const btnDownload = document.getElementById('btn-download');
-            const urlInput = document.getElementById('spotify-url');
+            const urlInput = document.getElementById('media-url');
             const btnClear = document.getElementById('btn-clear');
             const outputPathInput = document.getElementById('output-path');
             const formatSelect = document.getElementById('audio-format');
@@ -193,6 +195,12 @@
 
             let eventSource = null;
             let currentDownloadId = null;
+
+            window.addEventListener('pagehide', () => {
+                if (currentDownloadId) {
+                    navigator.sendBeacon(`/api/download/${currentDownloadId}/cancel`);
+                }
+            });
 
             // Load Config
             fetch('/api/config')
@@ -293,7 +301,7 @@
             function startDownload() {
                 const url = urlInput.value.trim();
                 if (!url) {
-                    alert('Please enter a Spotify URL!');
+                    alert('Please enter a media link.');
                     urlInput.focus();
                     return;
                 }
@@ -307,7 +315,7 @@
                 progressCard.classList.remove('hidden');
                 logConsole.innerHTML = '<div class="log-line info">Starting downloader thread...</div>';
                 updateTrackProgress(0, 0);
-                statusHeading.innerText = 'Connecting to Spotify & YouTube...';
+                statusHeading.innerText = 'Finding tracks…';
                 statusPill.className = 'status-pill status-active';
                 statusPill.innerText = 'Processing';
                 dlSpinner.classList.remove('hidden');
