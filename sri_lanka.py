@@ -2,6 +2,7 @@
 
 from contextlib import closing
 import json
+import os
 import queue
 import threading
 from tempfile import TemporaryFile
@@ -29,12 +30,24 @@ def normalized(text):
 
 
 def executable():
-    command = shutil.which("yt-dlp")
-    if not command and Path("/opt/homebrew/bin/yt-dlp").is_file():
-        command = "/opt/homebrew/bin/yt-dlp"
-    if not command:
-        raise RuntimeError("Install the current yt-dlp command to use Sri Lankan discovery.")
-    return command
+    candidates = (
+        Path("/opt/homebrew/bin/yt-dlp"),
+        Path(shutil.which("yt-dlp") or ""),
+    )
+    for candidate in candidates:
+        if candidate != Path("") and candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    raise RuntimeError("Install the current yt-dlp command to use Sri Lankan discovery.")
+
+
+def command_environment():
+    environment = os.environ.copy()
+    homebrew_bin = "/opt/homebrew/bin"
+    if Path(homebrew_bin).is_dir():
+        environment["PATH"] = os.pathsep.join((
+            homebrew_bin, environment.get("PATH", os.defpath),
+        ))
+    return environment
 
 
 def extract_title(raw_title, artist):
@@ -61,7 +74,7 @@ def search_entries(query, checkpoint):
             [executable(), "--flat-playlist", "--lazy-playlist", "--dump-json",
              "--skip-download", "--quiet", "--no-warnings", "--socket-timeout", "15",
              "--retries", "1", "--extractor-retries", "1", "ytsearchall:" + query],
-            stdout=subprocess.PIPE, stderr=errors, text=True,
+            stdout=subprocess.PIPE, stderr=errors, text=True, env=command_environment(),
         )
         output = queue.Queue()
 
@@ -147,7 +160,7 @@ def download(url, path, available):
          "--max-filesize", str(available), "-f", "bestaudio/best",
          "--ffmpeg-location", ffmpeg, "-x", "--audio-format", "mp3",
          "--audio-quality", "192K", "-o", str(path.with_suffix(".%(ext)s")), url],
-        capture_output=True, text=True, timeout=240,
+        capture_output=True, text=True, timeout=240, env=command_environment(),
     )
     if result.returncode or not path.is_file():
         raise RuntimeError("Audio retrieval failed. " + result.stderr.strip()[-250:])
