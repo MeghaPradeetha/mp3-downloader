@@ -10,7 +10,10 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import time
 import unicodedata
+
+import requests
 
 
 ARTISTS = (
@@ -23,10 +26,71 @@ ARTISTS = (
     "Shihan Mihiranga", "Bachi Susan", "Radeesh Vandebona", "Lahiru Perera",
     "Centigradz", "Daddy", "Mihindu Ariyaratne",
 )
+MUSICBRAINZ_URL = "https://musicbrainz.org/ws/2/artist/"
+MUSICBRAINZ_USER_AGENT = "mp3-downloader/1.0 (local personal library tool)"
 
 
 def normalized(text):
     return re.sub(r"\W+", "", unicodedata.normalize("NFKC", text).casefold())
+
+
+def artist_keys(artist):
+    names = {artist}
+    if "&" in artist:
+        names.update(artist.replace("&", joiner) for joiner in ("and", "n"))
+    return {key for key in map(normalized, names) if key}
+
+
+def discover_artists(session, checkpoint=lambda: None):
+    artists = list(ARTISTS)
+    seen = {normalized(name) for name in artists}
+    offset = 0
+    page_size = 100
+    total = None
+    while total is None or offset < total:
+        checkpoint()
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = session.get(
+                    MUSICBRAINZ_URL,
+                    params={
+                        "query": "country:LK",
+                        "fmt": "json",
+                        "limit": page_size,
+                        "offset": offset,
+                    },
+                    headers={"User-Agent": MUSICBRAINZ_USER_AGENT},
+                    timeout=(10, 30),
+                )
+                response.raise_for_status()
+                data = response.json()
+                break
+            except (requests.RequestException, ValueError) as exc:
+                last_error = exc
+                if attempt == 2:
+                    raise RuntimeError(
+                        "Could not load the full Sri Lankan artist catalog from MusicBrainz."
+                    ) from exc
+                time.sleep(2 ** (attempt + 1))
+        else:
+            raise RuntimeError(
+                "Could not load the full Sri Lankan artist catalog from MusicBrainz."
+            ) from last_error
+        page = data.get("artists", [])
+        total = int(data.get("count", len(page)))
+        if not page:
+            break
+        for item in page:
+            name = str(item.get("name", "")).strip()
+            key = normalized(name)
+            if name and key and key not in seen:
+                seen.add(key)
+                artists.append(name)
+        offset += len(page)
+        if offset < total:
+            time.sleep(1.1)
+    return artists
 
 
 def executable():
@@ -52,9 +116,9 @@ def command_environment():
 
 def extract_title(raw_title, artist):
     parts = re.split(r"\s*[|]\s*|\s+[-–—]\s+", raw_title)
-    artist_key = normalized(artist)
+    keys = artist_keys(artist)
     for index, part in enumerate(parts):
-        if artist_key and artist_key in normalized(part):
+        if any(key in normalized(part) for key in keys):
             parts = parts[index + 1:] if index == 0 else parts[:index]
             break
     title = parts[0].strip() if parts else ""
@@ -112,12 +176,13 @@ def search_entries(query, checkpoint):
             process.stdout.close()
 
 
-def discover(artist, limit=None, genre="", category="all", checkpoint=lambda: None):
+def discover(artist, limit=None, genre="", category="all", checkpoint=lambda: None, exclude=()):
     query = f"{artist} {genre} official music"
     if category != "all":
         query += " single" if category == "single" else " album track"
     tracks = []
     seen = set()
+    keys = artist_keys(artist)
     with closing(search_entries(query, checkpoint)) as entries:
         for entry in entries:
             checkpoint()
@@ -125,15 +190,15 @@ def discover(artist, limit=None, genre="", category="all", checkpoint=lambda: No
             channel = normalized(entry.get("channel") or "")
             title = entry.get("title") or ""
             # Restrict automatic matches to artist-named channels and individual songs.
-            if not duration or not 60 <= duration <= 600 or normalized(artist) not in channel:
+            if not duration or not 60 <= duration <= 600 or not any(key in channel for key in keys):
                 continue
             if re.search(r"\b(cover|karaoke|reaction|tutorial|collection|nonstop|medley)\b", title, re.I):
                 continue
             song_title = extract_title(title, artist)
-            if not song_title or normalized(song_title) == normalized(artist):
+            if not song_title or normalized(song_title) in keys:
                 continue
             video_id = entry.get("id", "")
-            if video_id in seen or not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            if video_id in seen or "yt_" + video_id in exclude or not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
                 continue
             seen.add(video_id)
             tracks.append({

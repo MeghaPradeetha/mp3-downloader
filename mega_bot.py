@@ -278,8 +278,17 @@ def run_continuously(session, client_id, args, roots, max_bytes, used, checkpoin
 
 
 def run_sri_lankan(session, args, roots, max_bytes, used, checkpoint):
-    from sri_lanka import ARTISTS, discover
-    artists = (args.artist,) if args.artist else ARTISTS
+    from sri_lanka import discover, discover_artists
+    if args.artist:
+        artists = (args.artist,)
+    else:
+        try:
+            artists = discover_artists(session, checkpoint)
+            print(f"Loaded {len(artists)} Sri Lankan artists.", flush=True)
+        except RuntimeError as exc:
+            print(f"Artist catalog warning: {exc} Using the starter artist list.", flush=True)
+            from sri_lanka import ARTISTS
+            artists = ARTISTS
     attempted = set()
     while True:
         for artist in artists:
@@ -287,12 +296,11 @@ def run_sri_lankan(session, args, roots, max_bytes, used, checkpoint):
             report_event("artist_searching", artist=safe_name(artist))
             print(f"Finding Sri Lankan songs by {artist}…", flush=True)
             try:
-                tracks = discover(artist, args.limit, args.genre or "", args.category, checkpoint)
+                tracks = discover(artist, args.limit, args.genre or "", args.category, checkpoint, attempted)
             except (RuntimeError, subprocess.TimeoutExpired, ValueError) as exc:
                 report_event("artist_search_failed", artist=safe_name(artist))
                 print(f"Search skipped for {artist}. {exc}", flush=True)
                 continue
-            tracks = [track for track in tracks if track["id"] not in attempted]
             if tracks:
                 used = upload(session, tracks, roots, max_bytes, checkpoint, minimum_used=used)
                 attempted.update(track["id"] for track in tracks)

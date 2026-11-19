@@ -98,9 +98,11 @@ This tool is for educational and personal use only. Downloading copyrighted mate
 ## MEGA music bot
 
 Selecting Sri Lanka with the Auto source searches public artist channels using the installed
-yt-dlp command. The bot cycles through 30 Sri Lankan artists, creates artist folders, skips
-existing songs, and continues until End or the storage limit. The current yt-dlp command and
-FFmpeg are required. On macOS, install the downloader with `brew install yt-dlp`.
+yt-dlp command. Unless a specific artist is selected, the bot loads every Sri Lankan artist
+currently cataloged by MusicBrainz, adds its local starter artists, removes duplicate names,
+and searches public artist channels. It creates artist folders, skips existing songs, and
+continues until End or the storage limit. The current yt-dlp command and FFmpeg are required.
+On macOS, install the downloader with `brew install yt-dlp`.
 Genre and category narrow the public search terms in this mode. Pause and End take effect
 after the current operation finishes.
 
