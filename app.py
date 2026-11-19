@@ -13,6 +13,7 @@ import subprocess
 from collections import deque
 from pathlib import Path
 from urllib.parse import urlsplit
+import upload_analytics
 
 import yt_dlp
 # Patch yt-dlp to bypass Python 3.9 deprecation warning exception
@@ -29,6 +30,7 @@ from flask_cors import CORS
 from download import DownloadCancelled, check_and_install_ffmpeg, download_spotify_url, DEFAULT_OUTPUT_DIR
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 CORS(app)
 
 # Global queue and active download state tracking
@@ -36,7 +38,8 @@ active_downloads = {}
 log_queues = {}
 download_cancellations = {}
 mega_state_lock = threading.Lock()
-mega_state = {"status": "idle", "logs": deque(maxlen=200), "process": None}
+mega_state = {"status": "idle", "logs": deque(maxlen=200), "process": None, "run_id": None}
+analytics_path = Path(app.instance_path, "upload-analytics.sqlite")
 
 def sanitize_url(url):
     return url.strip()
@@ -83,45 +86,67 @@ def mega_status():
     with mega_state_lock:
         return jsonify(status=mega_state["status"], logs=list(mega_state["logs"]))
 
+@app.get("/api/mega/analytics")
+def mega_analytics():
+    if not local_mega_request():
+        return jsonify(error="Open the dashboard on localhost to use MEGA."), 403
+    result = upload_analytics.snapshot(analytics_path, request.args.get("run"))
+    with mega_state_lock:
+        if result["run"] and result["run"]["id"] == mega_state["run_id"]:
+            result["run"]["status"] = mega_state["status"]
+    return jsonify(result)
+
 @app.post("/api/mega")
 def start_mega():
     if not local_mega_request():
         return jsonify(error="Open the dashboard on localhost to use MEGA."), 403
     data = request.get_json(silent=True)
-    fields = ("destinations", "country", "genre", "artist", "category", "limit", "storage", "client_id")
+    fields = ("destinations", "country", "genre", "artist", "category", "limit", "storage", "client_id", "source")
     if not isinstance(data, dict) or any(not isinstance(data.get(field, ""), str) for field in fields):
         return jsonify(error="Invalid bot settings."), 400
     destinations = [line.strip() for line in data.get("destinations", "").splitlines() if line.strip()]
     if not destinations or any(not line.startswith(("/", "https://")) for line in destinations):
         return jsonify(error="Enter a MEGA folder link or cloud path on each line."), 400
     client_id = data.get("client_id", "").strip() or jamendo_client_id()
-    if not client_id:
+    source = data.get("source", "auto")
+    if source not in ("auto", "jamendo", "sri-lanka"):
+        return jsonify(error="Invalid music source."), 400
+    sri_lankan = source == "sri-lanka" or (source == "auto" and data.get("country", "").upper() == "LKA")
+    if not client_id and not sri_lankan:
         return jsonify(error="Enter your Jamendo Client ID to search for music."), 400
 
-    command = [sys.executable, "-u", str(Path(__file__).with_name("mega_bot.py")), "--dashboard-control", "--dest", *destinations]
+    command = [sys.executable, "-u", str(Path(__file__).with_name("mega_bot.py")), "--dashboard-control", "--continuous", "--dest", *destinations]
     for field, flag in (
         ("country", "country"), ("genre", "genre"), ("artist", "artist"),
-        ("category", "category"), ("limit", "limit"), ("storage", "max-storage-gb"),
+        ("category", "category"), ("limit", "limit"), ("storage", "max-storage-gb"), ("source", "source"),
     ):
         value = data.get(field, "").strip()
         if value:
             command.append(f"--{flag}={value}")
-    env = {**os.environ, "JAMENDO_CLIENT_ID": client_id}
+    env = {**os.environ, "JAMENDO_CLIENT_ID": client_id or "", "MP3_BOT_ANALYTICS": "1"}
     mac_mega = Path("/Applications/MEGAcmd.app/Contents/MacOS")
     if mac_mega.is_dir():
         env["PATH"] = os.pathsep.join((str(mac_mega), os.environ.get("PATH", os.defpath)))
 
-    def run_bot(process):
+    def run_bot(process, run_id):
         status = "failed"
         try:
             with process:
                 for line in process.stdout:
+                    if line.startswith(upload_analytics.EVENT_PREFIX):
+                        upload_analytics.record(
+                            analytics_path, run_id,
+                            json.loads(line[len(upload_analytics.EVENT_PREFIX):]),
+                        )
+                        continue
                     if line.rstrip() == "[bot paused]":
                         with mega_state_lock:
                             if mega_state["status"] == "pausing":
                                 mega_state["status"] = "paused"
                         continue
-                    message = line.rstrip().replace(client_id, "[Client ID]")
+                    message = line.rstrip()
+                    if client_id:
+                        message = message.replace(client_id, "[Client ID]")
                     for destination in destinations:
                         if destination.startswith("https://"):
                             message = message.replace(destination, "[MEGA link]")
@@ -129,6 +154,7 @@ def start_mega():
                         mega_state["logs"].append(message)
                 status = {0: "finished", 130: "ended"}.get(process.wait(), "failed")
         finally:
+            upload_analytics.finish(analytics_path, run_id, status)
             with mega_state_lock:
                 mega_state.update(status=status, process=None)
 
@@ -142,9 +168,10 @@ def start_mega():
             )
         except (OSError, ValueError):
             return jsonify(error="Could not start the MEGA bot."), 500
+        run_id = upload_analytics.begin(analytics_path)
         mega_state["logs"].clear()
-        mega_state.update(status="running", process=process)
-        threading.Thread(target=run_bot, args=(process,), daemon=True).start()
+        mega_state.update(status="running", process=process, run_id=run_id)
+        threading.Thread(target=run_bot, args=(process, run_id), daemon=True).start()
     return jsonify(status="running"), 202
 
 

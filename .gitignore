@@ -1,3 +1,5 @@
 downloads/
 /instance/mega-destinations.txt
 /instance/jamendo-client-id.txt
+
+/instance/upload-analytics.sqlite*

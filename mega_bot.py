@@ -2,21 +2,29 @@
 """Pick a Jamendo artist and upload their downloadable tracks to MEGA."""
 
 import argparse
+import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import threading
+import time
+import unicodedata
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
 import requests
 from mutagen import MutagenError
 from mutagen.mp3 import MP3
+from upload_analytics import EVENT_PREFIX
 
 
 class BotError(Exception):
+    pass
+
+
+class AudioError(BotError):
     pass
 
 
@@ -61,6 +69,11 @@ def dashboard_checkpoint():
 
 def continue_run():
     pass
+
+
+def report_event(kind, **fields):
+    if os.environ.get("MP3_BOT_ANALYTICS") == "1":
+        print(EVENT_PREFIX + json.dumps({"type": kind, **fields}), flush=True)
 
 
 def mega(command, *args):
@@ -148,15 +161,27 @@ def catalog(session, client_id, endpoint, **filters):
 
 def catalog_pages(session, client_id, endpoint, page_size=100, checkpoint=continue_run, **filters):
     offset = 0
+    previous_page = None
     while True:
         checkpoint()
         page = catalog(session, client_id, endpoint, limit=page_size, offset=offset, **filters)
-        if not page and offset == 0 and endpoint == "tracks":
-            # Jamendo sometimes returns an empty first page for larger queries.
-            page_size = 8
-            page = catalog(session, client_id, endpoint, limit=page_size, **filters)
+        if not page and endpoint == "tracks":
+            # A smaller request can recover a falsely empty Jamendo page.
+            for retry_size in (20, 8):
+                checkpoint()
+                pagination = {"offset": offset} if offset else {}
+                page = catalog(
+                    session, client_id, endpoint, limit=retry_size, **pagination, **filters,
+                )
+                if page:
+                    page_size = retry_size
+                    break
         if not page:
             break
+        page_ids = tuple(str(item["id"]) for item in page)
+        if page_ids == previous_page:
+            break
+        previous_page = page_ids
         yield page
         offset += len(page)
         if len(page) < page_size:
@@ -170,15 +195,17 @@ def downloadable(tracks):
     ]
 
 
-def select_tracks(session, client_id, args, checkpoint=continue_run):
+def artist_batches(session, client_id, args, checkpoint=continue_run, seen=None, discovery_order="popularity_total"):
+    if seen is None:
+        seen = set()
     track_type = "single albumtrack" if args.category == "all" else args.category
     filters = {"type": track_type, "audiodlformat": "mp32"}
     if args.genre:
         genre = args.genre.strip().lower()
         filters["tags"] = {"hip hop": "hiphop", "hip-hop": "hiphop"}.get(genre, genre)
-        filters["boost"] = "popularity_total"
+        filters["boost"] = discovery_order
     else:
-        filters["order"] = "popularity_total"
+        filters["order"] = discovery_order
     if args.artist:
         filters["artist_name"] = args.artist
     if args.country:
@@ -194,26 +221,125 @@ def select_tracks(session, client_id, args, checkpoint=continue_run):
 
     for group in groups:
         for page in catalog_pages(session, client_id, "tracks", checkpoint=checkpoint, **filters, **group):
-            matches = downloadable(page)
-            if matches:
-                artist_id = matches[0]["artist_id"]
-                artist_tracks = {track["id"]: track for track in matches if track["artist_id"] == artist_id}
-                if len(artist_tracks) >= args.limit:
-                    return list(artist_tracks.values())[:args.limit]
-                # Fetch additional matches for the selected artist only.
-                for artist_page in catalog_pages(
-                    session, client_id, "tracks", checkpoint=checkpoint, **{**filters, "artist_id": artist_id},
+            by_artist = {}
+            for track in downloadable(page):
+                by_artist.setdefault(track["artist_id"], {})[track["id"]] = track
+            for artist_id, tracks in by_artist.items():
+                checkpoint()
+                if artist_id in seen:
+                    continue
+                seen.add(artist_id)
+                if args.limit is None or len(tracks) < args.limit:
+                    for artist_page in catalog_pages(
+                        session, client_id, "tracks", checkpoint=checkpoint,
+                        **{**filters, "artist_id": artist_id},
+                    ):
+                        tracks.update((track["id"], track) for track in downloadable(artist_page))
+                        if args.limit is not None and len(tracks) >= args.limit:
+                            break
+                yield list(tracks.values())[:args.limit]
+
+
+def select_tracks(session, client_id, args, checkpoint=continue_run):
+    tracks = next(artist_batches(session, client_id, args, checkpoint), None)
+    if tracks is None:
+        raise BotError("Jamendo has no downloadable tracks for those preferences.")
+    return tracks
+
+
+def run_continuously(session, client_id, args, roots, max_bytes, used, checkpoint):
+    seen = set()
+    searches = [args]
+    if not args.genre:
+        searches.extend(
+            argparse.Namespace(**{**vars(args), "genre": genre})
+            for genre in ("pop", "hiphop", "rock", "electronic", "jazz", "classical", "folk", "world")
+        )
+    while True:
+        for order in ("popularity_total", "downloads_total", "listens_total"):
+            for preferences in searches:
+                checkpoint()
+                for tracks in artist_batches(
+                    session, client_id, preferences, checkpoint, seen, discovery_order=order,
                 ):
-                    for track in downloadable(artist_page):
-                        artist_tracks[track["id"]] = track
-                        if len(artist_tracks) >= args.limit:
-                            return list(artist_tracks.values())
-                return list(artist_tracks.values())
-    raise BotError("Jamendo has no downloadable tracks for those preferences.")
+                    used = upload(session, tracks, roots, max_bytes, checkpoint, minimum_used=used)
+        current, capacity = quota()
+        if max(current, used) >= min(capacity, max_bytes or capacity):
+            raise StorageLimit("MEGA storage limit reached.")
+        country = f" in {args.country}" if args.country else ""
+        print(
+            f"Checked {len(seen)} artists{country}. No new matching artists right now. "
+            "Checking again in 60 seconds.",
+            flush=True,
+        )
+        for _ in range(60):
+            checkpoint()
+            time.sleep(1)
+
+
+def run_sri_lankan(session, args, roots, max_bytes, used, checkpoint):
+    from sri_lanka import ARTISTS, discover
+    artists = (args.artist,) if args.artist else ARTISTS
+    attempted = set()
+    while True:
+        for artist in artists:
+            checkpoint()
+            report_event("artist_searching", artist=safe_name(artist))
+            print(f"Finding Sri Lankan songs by {artist}…", flush=True)
+            try:
+                tracks = discover(artist, args.limit, args.genre or "", args.category, checkpoint)
+            except (RuntimeError, subprocess.TimeoutExpired, ValueError) as exc:
+                report_event("artist_search_failed", artist=safe_name(artist))
+                print(f"Search skipped for {artist}. {exc}", flush=True)
+                continue
+            tracks = [track for track in tracks if track["id"] not in attempted]
+            if tracks:
+                used = upload(session, tracks, roots, max_bytes, checkpoint, minimum_used=used)
+                attempted.update(track["id"] for track in tracks)
+            else:
+                report_event("artist_no_matches", artist=safe_name(artist))
+        if not args.continuous or args.artist:
+            return
+        current, capacity = quota()
+        if max(current, used) >= min(capacity, max_bytes or capacity):
+            raise StorageLimit("MEGA storage limit reached.")
+        print("Sri Lankan artist round complete. Checking for more songs in 60 seconds.", flush=True)
+        for _ in range(60):
+            checkpoint()
+            time.sleep(1)
 
 
 def safe_name(value):
     return re.sub(r'[\x00-\x1f<>:"/\\|?*\[\]]', "_", value).strip(" .")[:75] or "Untitled"
+
+
+def track_identity(artist, title):
+    def normalize(value):
+        return re.sub(r"\W+", "", unicodedata.normalize("NFKC", value).casefold())
+    return (
+        normalize(safe_name(artist.split(",")[0].strip())),
+        normalize(safe_name(title)),
+    )
+
+
+def library_index(root):
+    identities = set()
+    track_ids = set()
+    for path in mega("find", root, "--type=f").splitlines():
+        if Path(path).suffix.lower() != ".mp3":
+            continue
+        title = Path(path).stem
+        artist = Path(path).parent.name
+        match = re.search(r" \[(\d+|yt_[A-Za-z0-9_-]{11})\]$", title)
+        if match:
+            track_ids.add(match[1])
+            title = title[:match.start()]
+        else:
+            title = re.sub(r" \(\d+\)$", "", title)
+            if " - " in title:
+                artist, title = title.split(" - ", 1)
+        identities.add(track_identity(artist, title))
+    return identities, track_ids
 
 
 def fetch_audio(session, url, path, available):
@@ -230,29 +356,33 @@ def fetch_audio(session, url, path, available):
                         raise StorageLimit("The next track will exceed the storage limit.")
                     output.write(chunk)
     except requests.RequestException as exc:
-        raise BotError("Could not retrieve the track from Jamendo.") from exc
+        raise AudioError("Could not retrieve the track from Jamendo.") from exc
     if not size:
-        raise BotError("Jamendo returned an empty audio file.")
+        raise AudioError("Jamendo returned an empty audio file.")
     try:
         MP3(path)
     except MutagenError as exc:
-        raise BotError("Jamendo returned an invalid MP3 file.") from exc
+        raise AudioError("Jamendo returned an invalid MP3 file.") from exc
     return size
 
 
-def upload(session, tracks, roots, max_bytes, checkpoint=continue_run):
+def upload(session, tracks, roots, max_bytes, checkpoint=continue_run, minimum_used=0):
     artist = safe_name(tracks[0]["artist_name"])
+    report_event("artist_started", artist=artist, track_ids=[str(track["id"]) for track in tracks])
     print(f"Selected {artist}. Found {len(tracks)} downloadable tracks.", flush=True)
-    used, ceiling = quota()
+    current, _ = quota()
+    used = max(current, minimum_used)
 
     def remaining():
         current, capacity = quota()
         return min(capacity, max_bytes or capacity) - max(current, used)
 
     folders = [f"{root.rstrip('/')}/{artist}" for root in roots]
+    indexes = {}
     contents = {}
     for root, folder in zip(roots, folders):
         checkpoint()
+        indexes[folder] = library_index(root)
         if artist in listed_names(root):
             contents[folder] = listed_names(folder)
 
@@ -262,15 +392,34 @@ def upload(session, tracks, roots, max_bytes, checkpoint=continue_run):
             for track in tracks:
                 checkpoint()
                 name = f"{safe_name(track['name'])} [{track['id']}].mp3"
-                pending = [folder for folder in folders if name not in contents.get(folder, ())]
+                identity = track_identity(track["artist_name"], track["name"])
+                pending = [
+                    folder for folder in folders
+                    if identity not in indexes[folder][0] and str(track["id"]) not in indexes[folder][1]
+                ]
                 if not pending:
+                    report_event("track_skipped", artist=artist, track_id=str(track["id"]), title=track["name"])
                     print(f"Already uploaded {name}", flush=True)
                     continue
                 available = remaining() // len(pending)
                 if available <= 0:
                     raise StorageLimit("MEGA storage limit reached.")
                 path = Path(temporary, name)
-                size = fetch_audio(session, track["audiodownload"], path, available)
+                try:
+                    if track.get("source") == "youtube":
+                        from sri_lanka import download
+                        try:
+                            size = download(track["audiodownload"], path, available)
+                            MP3(path)
+                        except (RuntimeError, subprocess.TimeoutExpired, MutagenError) as exc:
+                            raise AudioError(str(exc)) from exc
+                    else:
+                        size = fetch_audio(session, track["audiodownload"], path, available)
+                except AudioError as exc:
+                    report_event("track_failed", artist=artist, track_id=str(track["id"]), title=track["name"])
+                    path.unlink(missing_ok=True)
+                    print(f"Skipped {name}. {exc}", flush=True)
+                    continue
                 if size * len(pending) > remaining():
                     raise StorageLimit("The next track will exceed the storage limit.")
                 for folder in pending:
@@ -282,16 +431,24 @@ def upload(session, tracks, roots, max_bytes, checkpoint=continue_run):
                     if folder not in contents:
                         mega("mkdir", "-p", folder)
                         contents[folder] = set()
+                    print(f"Uploading {folder}/{name} ({size / 1_000_000:.1f} MB)…", flush=True)
                     mega("put", str(path), folder + "/")
                     contents[folder].add(name)
+                    indexes[folder][0].add(identity)
+                    indexes[folder][1].add(str(track["id"]))
                     used += size
                     copies += 1
+                    report_event(
+                        "track_uploaded", artist=artist, track_id=str(track["id"]),
+                        title=track["name"], destination=folder, bytes=size,
+                    )
                     print(f"Uploaded {folder}/{name}", flush=True)
                     checkpoint()
                 path.unlink()
-    except StorageLimit as exc:
-        print(f"Stopped. {exc}")
-    print(f"Uploaded {copies} file copies to MEGA.")
+    finally:
+        print(f"Uploaded {copies} file copies to MEGA.", flush=True)
+    report_event("artist_finished", artist=artist)
+    return used
 
 
 def listed_names(folder):
@@ -302,22 +459,27 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dest", nargs="+", action="extend", required=True, help="MEGA folder links or cloud paths")
     parser.add_argument("--country", type=str.upper, help="Three-letter country code, e.g. LKA, IND, or USA")
+    parser.add_argument("--source", choices=("auto", "jamendo", "sri-lanka"), default="auto")
     parser.add_argument("--genre", help="Jamendo genre/tag, e.g. pop or hiphop")
     parser.add_argument("--artist", help="Exact Jamendo artist name. Omit to select automatically.")
     parser.add_argument("--category", choices=("all", "single", "albumtrack"), default="all")
-    parser.add_argument("--limit", type=int, default=20, help="Maximum tracks per run (default 20)")
+    parser.add_argument("--limit", type=int, help="Optional maximum tracks per artist. Omit for no limit.")
     parser.add_argument("--max-storage-gb", type=float, help="Optional account storage cap in decimal GB")
+    parser.add_argument("--continuous", action="store_true", help="Keep discovering artists until stopped")
     parser.add_argument("--dashboard-control", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    sri_lankan = args.source == "sri-lanka" or (args.source == "auto" and args.country == "LKA")
+    if sri_lankan and args.country not in (None, "", "LKA"):
+        parser.error("Sri Lankan discovery requires Sri Lanka or Auto as the country.")
     if args.country and not re.fullmatch(r"[A-Z]{3}", args.country):
         parser.error("--country needs a three-letter code, such as LKA.")
-    if args.limit < 1:
+    if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive.")
     if args.max_storage_gb is not None and not (0.000000001 <= args.max_storage_gb <= sys.maxsize):
         parser.error("--max-storage-gb must be a finite positive size of at least one byte.")
     max_bytes = int(args.max_storage_gb * 1_000_000_000) if args.max_storage_gb else None
     client_id = os.environ.get("JAMENDO_CLIENT_ID")
-    if not client_id:
+    if not client_id and not sri_lankan:
         parser.error("Set the JAMENDO_CLIENT_ID environment variable.")
 
     checkpoint = dashboard_checkpoint() if args.dashboard_control else continue_run
@@ -330,8 +492,15 @@ def main():
             print("Stopped. MEGA storage limit reached.")
             return 0
         with requests.Session() as session:
-            tracks = select_tracks(session, client_id, args, checkpoint)
-            upload(session, tracks, roots, max_bytes, checkpoint)
+            if sri_lankan:
+                run_sri_lankan(session, args, roots, max_bytes, used, checkpoint)
+            elif args.continuous and not args.artist:
+                run_continuously(session, client_id, args, roots, max_bytes, used, checkpoint)
+            else:
+                tracks = select_tracks(session, client_id, args, checkpoint)
+                upload(session, tracks, roots, max_bytes, checkpoint, minimum_used=used)
+    except StorageLimit as exc:
+        print(f"Stopped. {exc}", flush=True)
     except (BotError, OSError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

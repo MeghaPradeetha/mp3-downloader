@@ -639,3 +639,69 @@ body {
     opacity: 0.5;
     cursor: default;
 }
+
+.mega-analytics-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.mega-analytics-heading h2 {
+    font-size: 18px;
+}
+
+#mega-run-history {
+    max-width: 230px;
+    padding: 8px;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    background: var(--bg-dark);
+    color: var(--text-main);
+    font: inherit;
+    color-scheme: dark;
+}
+
+.mega-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+    gap: 12px;
+    margin: 18px 0;
+}
+
+.mega-metrics > div {
+    padding: 14px;
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius-md);
+    background: var(--bg-dark);
+}
+
+.mega-metrics dt {
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.mega-metrics dd {
+    margin-top: 6px;
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--primary-hover);
+}
+
+.mega-artist-table {
+    margin-top: 16px;
+    overflow-x: auto;
+}
+
+.mega-artist-table th,
+.mega-artist-table td {
+    padding: 12px 10px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+#mega-analytics-partial {
+    margin-top: 8px;
+}

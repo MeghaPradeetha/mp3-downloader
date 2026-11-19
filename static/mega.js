@@ -101,3 +101,80 @@ pauseButton.addEventListener('click', () => {
 endButton.addEventListener('click', () => submitAction('/end', {}));
 
 pollActivity();
+
+const runHistory = document.querySelector('#mega-run-history');
+const artistRows = document.querySelector('#mega-artist-rows');
+let analyticsBusy = false;
+
+function formatUploadSize(bytes) {
+    if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + ' GB';
+    return (bytes / 1e6).toFixed(1) + ' MB';
+}
+
+async function updateAnalytics() {
+    if (analyticsBusy) return;
+    analyticsBusy = true;
+    try {
+        const query = runHistory.value ? '?run=' + encodeURIComponent(runHistory.value) : '';
+        const response = await fetch('/api/mega/analytics' + query, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Upload analytics are temporarily unavailable.');
+        const result = await response.json();
+        const selected = runHistory.value;
+        if (query !== (selected ? '?run=' + encodeURIComponent(selected) : '')) return;
+        runHistory.replaceChildren(new Option('Latest run', ''));
+        for (const run of result.history) {
+            runHistory.add(new Option(new Date(run.started).toLocaleString(), run.id));
+        }
+        runHistory.value = selected;
+        const run = result.run;
+        if (!run) return;
+        const context = run.current_artist
+            ? 'Current artist · ' + run.current_artist
+            : (statusMessages[run.status] || run.status);
+        document.querySelector('#mega-analytics-context').textContent =
+            context + ' · Started ' + new Date(run.started).toLocaleString();
+        document.querySelector('#mega-analytics-partial').hidden = !run.partial;
+        document.querySelector('#mega-count-uploaded').textContent = run.uploaded;
+        document.querySelector('#mega-count-skipped').textContent = run.skipped;
+        document.querySelector('#mega-count-failed').textContent = run.failed;
+        document.querySelector('#mega-count-artists').textContent = run.completed_artists;
+        document.querySelector('#mega-count-size').textContent =
+            run.partial ? 'Unavailable' : formatUploadSize(run.uploaded_bytes);
+        const labels = {
+            searching: 'Searching', processing: 'In progress', complete: 'Batch complete',
+            no_matches: 'No matches', search_failed: 'Search failed', interrupted: 'Interrupted',
+        };
+        const rows = run.artists.map(artist => {
+            const row = document.createElement('tr');
+            const label = artist.status === 'complete' && artist.failed
+                ? 'Finished with errors' : labels[artist.status];
+            for (const text of [
+                artist.name, label,
+                artist.candidates ? artist.processed + ' / ' + artist.candidates : artist.processed,
+                artist.uploaded, artist.skipped, artist.failed,
+            ]) {
+                const cell = document.createElement('td');
+                cell.textContent = text;
+                row.append(cell);
+            }
+            return row;
+        });
+        if (!rows.length) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 6;
+            cell.textContent = 'Waiting for the first artist…';
+            row.append(cell);
+            rows.push(row);
+        }
+        artistRows.replaceChildren(...rows);
+    } catch (error) {
+        document.querySelector('#mega-analytics-context').textContent = error.message;
+    } finally {
+        analyticsBusy = false;
+    }
+}
+
+runHistory.addEventListener('change', updateAnalytics);
+updateAnalytics();
+setInterval(updateAnalytics, 3000);

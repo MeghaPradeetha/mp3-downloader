@@ -97,6 +97,16 @@ This tool is for educational and personal use only. Downloading copyrighted mate
 
 ## MEGA music bot
 
+Selecting Sri Lanka with the Auto source searches public artist channels using the installed
+yt-dlp command. The bot cycles through 30 Sri Lankan artists, creates artist folders, skips
+existing songs, and continues until End or the storage limit. The current yt-dlp command and
+FFmpeg are required. On macOS, install the downloader with `brew install yt-dlp`.
+Genre and category narrow the public search terms in this mode. Pause and End take effect
+after the current operation finishes.
+
+Leave Tracks per artist blank to collect all matching songs returned by the source.
+The CLI also has no per-artist cap unless you pass an explicit --limit.
+
 The bot picks one artist per run from [Jamendo](https://developer.jamendo.com/v3.0/tracks), creates an artist folder in each destination, and uploads MP3s that the artist has enabled for download. It stages one track at a time in a temporary directory and skips previously uploaded tracks when you rerun it.
 
 1. Install [MEGAcmd](https://github.com/meganz/MEGAcmd) and sign in to the destination account in its interactive shell (`/Applications/MEGAcmd.app/Contents/MacOS/MEGAcmdShell` on macOS, then `login YOUR_EMAIL`). On macOS, if the commands are missing from your terminal, run `export PATH="/Applications/MEGAcmd.app/Contents/MacOS:$PATH"`.
